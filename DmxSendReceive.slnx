@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="DmxReceiver/DmxReceiver.csproj" />
+  <Project Path="DmxReceiver.Tests/DmxReceiver.Tests.csproj" />
+  <Project Path="DmxSender.Tests/DmxSender.Tests.csproj" />
+  <Project Path="DmxSender/DmxSender.csproj" />
+</Solution>

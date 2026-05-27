@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DmxReceiver": {
+      "commandName": "Project",
+      "commandLineArgs": "-p com3"
+    }
+  }
+}
