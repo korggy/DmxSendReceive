@@ -8,7 +8,7 @@ The tools use standard DMX UART settings, `250000 8N2`, and are designed for pra
 
 | Project | Description |
 | --- | --- |
-| `DmxSender` | Console app that sends DMX512-style frames through a USB-to-RS485 adapter. Supports fixed channel values, random channel values, per-channel random ranges, random updates by interval or keypress, and optional output logging. |
+| `DmxSender` | Console app that sends DMX512-style frames through a USB-to-RS485 adapter. Supports fixed channel values, random channel values, mouse-tracked channel values, per-channel value ranges, interval and keypress random updates, and optional output logging. |
 | `DmxSender.Tests` | MSTest coverage for sender command parsing, DMX packet formatting, random value behavior, and output logging. |
 | `DmxReceiver` | Console app that monitors incoming DMX512-style serial data and reports inferred frame/break diagnostics. |
 | `DmxReceiver.Tests` | MSTest coverage for receiver parsing, diagnostics, summary output, and monitor command parsing. |
@@ -37,13 +37,21 @@ dotnet run --project .\DmxSender\DmxSender.csproj -- --port COM8 --fixed 5=255 -
 Constrain random values per channel:
 
 ```powershell
-dotnet run --project .\DmxSender\DmxSender.csproj -- --port COM8 --random 1 --random 2 --random-range 1=40-180 --random-range 2=10-20
+dotnet run --project .\DmxSender\DmxSender.csproj -- --port COM8 --random 1 --random 2 --range 1=40-180 --range 2=10-20
 ```
 
-Log output only when random values change:
+Track mouse position to channels:
 
 ```powershell
-dotnet run --project .\DmxSender\DmxSender.csproj -- --port COM8 --fixed 5=255 --fixed 6=100 --random 1 --random 2 --random-range 1=40-180 --random-range 2=10-20 --log-output random-change
+dotnet run --project .\DmxSender\DmxSender.csproj -- --port COM8 --mouse 1=x --mouse 2=y --range 1=40-180 --range 2=10-220
+```
+
+Mouse X maps the full screen from left `0` to right `255`; use `xi` to invert it. Mouse Y maps bottom `0` to top `255`; use `yi` to invert it.
+
+Log output only when random values or mouse-tracked values change:
+
+```powershell
+dotnet run --project .\DmxSender\DmxSender.csproj -- --port COM8 --fixed 5=255 --fixed 6=100 --random 1 --random 2 --range 1=40-180 --range 2=10-20 --log-output change
 ```
 
 See [DmxSender/README.md](DmxSender/README.md) for full sender usage.

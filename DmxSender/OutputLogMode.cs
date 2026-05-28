@@ -4,5 +4,5 @@ public enum OutputLogMode
 {
     None,
     Continuous,
-    RandomChange
+    Change
 }

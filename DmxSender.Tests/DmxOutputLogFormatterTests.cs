@@ -15,11 +15,11 @@ public sealed class DmxOutputLogFormatterTests
             ChannelCount: 3,
             FixedValues: [],
             RandomChannels: [],
-            RandomRanges: [],
-            RandomUpdateMode.Interval,
+            Ranges: [],
+            MouseChannels: [],
             RandomIntervalMs: 1000,
             RefreshHz: 30,
-            OutputLogMode.Continuous);
+            OutputLogMode: OutputLogMode.Continuous);
         byte[] packet = [0, 0, 0, 0, 0, 255, 100, 7];
 
         string line = DmxOutputLogFormatter.FormatFrame(12, options, packet);

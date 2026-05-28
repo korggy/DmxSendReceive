@@ -2,7 +2,7 @@
   "profiles": {
     "DmxSender": {
       "commandName": "Project",
-      "commandLineArgs": "-p com3 -f 6=50 -r 1 -r 2 -r 3 --random-range 3=0-139 -r 4 --random-range 4=0-63 --random-interval-ms 5000 --log-output random-change"
+      "commandLineArgs": "-p com3 -f 2=127 -m 3=x -m 6=y --log-output change"
     }
   }
 }

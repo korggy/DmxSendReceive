@@ -43,31 +43,21 @@ public static class DmxSendCommand
             DefaultValueFactory = _ => []
         };
 
-        var randomRangeOption = new Option<string[]>("--random-range")
+        var rangeOption = new Option<string[]>("--range")
         {
-            Description = "Per-channel random value range in channel=min-max form. Repeat for multiple random channels.",
+            Description = "Per-channel random or mouse value range in channel=min-max form. Repeat for multiple channels.",
             DefaultValueFactory = _ => []
         };
 
-        var randomUpdateOption = new Option<RandomUpdateMode>("--random-update")
+        var mouseOption = new Option<string[]>("--mouse", "-m")
         {
-            Description = "When random channels change: interval or keypress.",
-            DefaultValueFactory = _ => RandomUpdateMode.Interval,
-            CustomParser = result =>
-            {
-                string token = result.Tokens.Single().Value;
-                return token.ToLowerInvariant() switch
-                {
-                    "interval" => RandomUpdateMode.Interval,
-                    "keypress" => RandomUpdateMode.Keypress,
-                    _ => AddRandomUpdateError(result)
-                };
-            }
+            Description = "Mouse-tracked channel in channel=x, channel=xi, channel=y, or channel=yi form. Repeat for multiple channels.",
+            DefaultValueFactory = _ => []
         };
 
         var randomIntervalOption = CreatePositiveIntegerOption(
             "--random-interval-ms",
-            "Milliseconds between random value changes when --random-update is interval.",
+            "Milliseconds between random value changes.",
             defaultValue: DefaultRandomIntervalMs);
 
         var refreshHzOption = CreatePositiveIntegerOption(
@@ -77,7 +67,7 @@ public static class DmxSendCommand
 
         var logOutputOption = new Option<OutputLogMode>("--log-output")
         {
-            Description = "Log outgoing channel values: none, continuous, or random-change.",
+            Description = "Log outgoing channel values: none, continuous, or change.",
             DefaultValueFactory = _ => OutputLogMode.None,
             CustomParser = result =>
             {
@@ -86,7 +76,7 @@ public static class DmxSendCommand
                 {
                     "none" => OutputLogMode.None,
                     "continuous" => OutputLogMode.Continuous,
-                    "random-change" => OutputLogMode.RandomChange,
+                    "change" => OutputLogMode.Change,
                     _ => AddOutputLogModeError(result)
                 };
             }
@@ -99,8 +89,8 @@ public static class DmxSendCommand
             channelCountOption,
             fixedOption,
             randomOption,
-            randomRangeOption,
-            randomUpdateOption,
+            rangeOption,
+            mouseOption,
             randomIntervalOption,
             refreshHzOption,
             logOutputOption
@@ -134,27 +124,43 @@ public static class DmxSendCommand
                 AddRangeErrorIfNeeded(result, randomChannel, startChannel, endChannel);
             }
 
-            int[] randomChannels = result.GetValue(randomOption) ?? [];
-            var randomChannelSet = randomChannels.ToHashSet();
-            var randomRangeChannels = new HashSet<int>();
-
-            foreach (string value in result.GetValue(randomRangeOption) ?? [])
+            foreach (string value in result.GetValue(mouseOption) ?? [])
             {
-                if (!TryParseRandomChannelRange(value, out RandomChannelRange randomRange, out string error))
+                if (!TryParseMouseChannelMapping(value, out MouseChannelMapping mouseChannel, out string error))
                 {
                     result.AddError(error);
                     continue;
                 }
 
-                AddRangeErrorIfNeeded(result, randomRange.Channel, startChannel, endChannel);
-                if (!randomChannelSet.Contains(randomRange.Channel))
+                AddRangeErrorIfNeeded(result, mouseChannel.Channel, startChannel, endChannel);
+            }
+
+            int[] randomChannels = result.GetValue(randomOption) ?? [];
+            var randomChannelSet = randomChannels.ToHashSet();
+            var mouseChannelSet = (result.GetValue(mouseOption) ?? [])
+                .Select(value => TryParseMouseChannelMapping(value, out MouseChannelMapping mouseChannel, out _)
+                    ? mouseChannel.Channel
+                    : 0)
+                .ToHashSet();
+            var rangeChannels = new HashSet<int>();
+
+            foreach (string value in result.GetValue(rangeOption) ?? [])
+            {
+                if (!TryParseChannelRange(value, out ChannelRange range, out string error))
                 {
-                    result.AddError($"Random range channel {randomRange.Channel} must also be specified with --random.");
+                    result.AddError(error);
+                    continue;
                 }
 
-                if (!randomRangeChannels.Add(randomRange.Channel))
+                AddRangeErrorIfNeeded(result, range.Channel, startChannel, endChannel);
+                if (!randomChannelSet.Contains(range.Channel) && !mouseChannelSet.Contains(range.Channel))
                 {
-                    result.AddError($"Random range channel {randomRange.Channel} is specified more than once.");
+                    result.AddError($"Range channel {range.Channel} must also be specified with --random or --mouse.");
+                }
+
+                if (!rangeChannels.Add(range.Channel))
+                {
+                    result.AddError($"Range channel {range.Channel} is specified more than once.");
                 }
             }
         });
@@ -166,10 +172,15 @@ public static class DmxSendCommand
                     ? fixedValue
                     : throw new InvalidOperationException("Fixed channel values should have been validated before invocation."))
                 .ToArray();
-            RandomChannelRange[] randomRanges = (parseResult.GetValue(randomRangeOption) ?? [])
-                .Select(value => TryParseRandomChannelRange(value, out RandomChannelRange randomRange, out _)
-                    ? randomRange
-                    : throw new InvalidOperationException("Random ranges should have been validated before invocation."))
+            ChannelRange[] ranges = (parseResult.GetValue(rangeOption) ?? [])
+                .Select(value => TryParseChannelRange(value, out ChannelRange range, out _)
+                    ? range
+                    : throw new InvalidOperationException("Ranges should have been validated before invocation."))
+                .ToArray();
+            MouseChannelMapping[] mouseChannels = (parseResult.GetValue(mouseOption) ?? [])
+                .Select(value => TryParseMouseChannelMapping(value, out MouseChannelMapping mouseChannel, out _)
+                    ? mouseChannel
+                    : throw new InvalidOperationException("Mouse channels should have been validated before invocation."))
                 .ToArray();
 
             var options = new SendOptions(
@@ -178,8 +189,8 @@ public static class DmxSendCommand
                 parseResult.GetValue(channelCountOption),
                 fixedValues,
                 parseResult.GetValue(randomOption) ?? [],
-                randomRanges,
-                parseResult.GetValue(randomUpdateOption),
+                ranges,
+                mouseChannels,
                 parseResult.GetValue(randomIntervalOption),
                 parseResult.GetValue(refreshHzOption),
                 parseResult.GetValue(logOutputOption));
@@ -211,15 +222,9 @@ public static class DmxSendCommand
         return option;
     }
 
-    private static RandomUpdateMode AddRandomUpdateError(ArgumentResult result)
-    {
-        result.AddError("Expected --random-update to be interval or keypress.");
-        return RandomUpdateMode.Interval;
-    }
-
     private static OutputLogMode AddOutputLogModeError(ArgumentResult result)
     {
-        result.AddError("Expected --log-output to be none, continuous, or random-change.");
+        result.AddError("Expected --log-output to be none, continuous, or change.");
         return OutputLogMode.None;
     }
 
@@ -242,9 +247,9 @@ public static class DmxSendCommand
         return true;
     }
 
-    private static bool TryParseRandomChannelRange(string text, out RandomChannelRange randomRange, out string error)
+    private static bool TryParseChannelRange(string text, out ChannelRange range, out string error)
     {
-        randomRange = new RandomChannelRange(0, RandomValueRange.Full);
+        range = new ChannelRange(0, RandomValueRange.Full);
         error = string.Empty;
 
         string[] parts = text.Split('=', 2, StringSplitOptions.TrimEntries);
@@ -252,7 +257,7 @@ public static class DmxSendCommand
             || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int channel)
             || channel <= 0)
         {
-            error = $"Expected --random-range value '{text}' to use channel=min-max with channel >= 1 and values 0-255.";
+            error = $"Expected --range value '{text}' to use channel=min-max with channel >= 1 and values 0-255.";
             return false;
         }
 
@@ -262,12 +267,55 @@ public static class DmxSendCommand
             || !byte.TryParse(rangeParts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out byte max)
             || min > max)
         {
-            error = $"Expected --random-range value '{text}' to use channel=min-max with min <= max and values 0-255.";
+            error = $"Expected --range value '{text}' to use channel=min-max with min <= max and values 0-255.";
             return false;
         }
 
-        randomRange = new RandomChannelRange(channel, new RandomValueRange(min, max));
+        range = new ChannelRange(channel, new RandomValueRange(min, max));
         return true;
+    }
+
+    private static bool TryParseMouseChannelMapping(string text, out MouseChannelMapping mouseChannel, out string error)
+    {
+        mouseChannel = new MouseChannelMapping(0, MouseAxis.X);
+        error = string.Empty;
+
+        string[] parts = text.Split('=', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int channel)
+            || channel <= 0)
+        {
+            error = GetMouseChannelError(text);
+            return false;
+        }
+
+        MouseAxis axis;
+        switch (parts[1].ToLowerInvariant())
+        {
+            case "x":
+                axis = MouseAxis.X;
+                break;
+            case "xi":
+                axis = MouseAxis.XInverted;
+                break;
+            case "y":
+                axis = MouseAxis.Y;
+                break;
+            case "yi":
+                axis = MouseAxis.YInverted;
+                break;
+            default:
+                error = GetMouseChannelError(text);
+                return false;
+        }
+
+        mouseChannel = new MouseChannelMapping(channel, axis);
+        return true;
+    }
+
+    private static string GetMouseChannelError(string text)
+    {
+        return $"Expected --mouse value '{text}' to use channel=x, channel=xi, channel=y, or channel=yi with channel >= 1.";
     }
 
     private static void AddRangeErrorIfNeeded(CommandResult result, int channel, int startChannel, int endChannel)

@@ -6,8 +6,8 @@ public sealed record SendOptions(
     int ChannelCount,
     IReadOnlyList<ChannelValue> FixedValues,
     IReadOnlyList<int> RandomChannels,
-    IReadOnlyList<RandomChannelRange> RandomRanges,
-    RandomUpdateMode RandomUpdateMode,
+    IReadOnlyList<ChannelRange> Ranges,
+    IReadOnlyList<MouseChannelMapping> MouseChannels,
     int RandomIntervalMs,
     int RefreshHz,
     OutputLogMode OutputLogMode);

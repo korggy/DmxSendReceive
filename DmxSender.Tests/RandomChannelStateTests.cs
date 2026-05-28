@@ -32,7 +32,7 @@ public sealed class RandomChannelStateTests
     {
         var state = RandomChannelState.Create(
             [1, 3],
-            [new RandomChannelRange(1, new RandomValueRange(40, 180))],
+            [new ChannelRange(1, new RandomValueRange(40, 180))],
             new RangeAwareRandomByteSource());
 
         Assert.AreEqual(40, state.Values[1]);

@@ -22,7 +22,7 @@ public sealed class RandomChannelState
 
     public static RandomChannelState Create(
         IEnumerable<int> channels,
-        IEnumerable<RandomChannelRange> ranges,
+        IEnumerable<ChannelRange> ranges,
         IRandomByteSource randomByteSource)
     {
         ArgumentNullException.ThrowIfNull(channels);

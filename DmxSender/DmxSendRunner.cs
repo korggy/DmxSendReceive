@@ -8,6 +8,7 @@ public static class DmxSendRunner
         SendOptions options,
         IDmxTransport transport,
         IRandomByteSource randomByteSource,
+        IMousePositionSource mousePositionSource,
         IKeyPressSource keyPressSource,
         IDmxOutputLogger outputLogger,
         CancellationToken cancellationToken)
@@ -15,58 +16,62 @@ public static class DmxSendRunner
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(randomByteSource);
+        ArgumentNullException.ThrowIfNull(mousePositionSource);
         ArgumentNullException.ThrowIfNull(keyPressSource);
         ArgumentNullException.ThrowIfNull(outputLogger);
 
-        RandomChannelState randomState = RandomChannelState.Create(options.RandomChannels, options.RandomRanges, randomByteSource);
-        IRandomRefreshPolicy refreshPolicy = CreateRefreshPolicy(options, keyPressSource);
+        RandomChannelState randomState = RandomChannelState.Create(options.RandomChannels, options.Ranges, randomByteSource);
+        MouseChannelState mouseState = MouseChannelState.Create(options.MouseChannels, options.Ranges, mousePositionSource);
+        var intervalRefreshPolicy = new IntervalRandomRefreshPolicy(TimeSpan.FromMilliseconds(options.RandomIntervalMs));
+        var keypressRefreshPolicy = new KeypressRandomRefreshPolicy(keyPressSource);
         TimeSpan frameDelay = TimeSpan.FromSeconds(1.0 / options.RefreshHz);
         var stopwatch = Stopwatch.StartNew();
         TimeSpan lastRandomRefreshAt = TimeSpan.Zero;
         var frameNumber = 0L;
-        var randomValuesChanged = options.RandomChannels.Count > 0;
+        byte[]? previousPacket = null;
 
         while (!cancellationToken.IsCancellationRequested)
         {
             TimeSpan now = stopwatch.Elapsed;
-            if (options.RandomChannels.Count > 0 && refreshPolicy.ShouldRefresh(now - lastRandomRefreshAt))
+            bool randomValuesChanged = options.RandomChannels.Count > 0 && (
+                intervalRefreshPolicy.ShouldRefresh(now - lastRandomRefreshAt)
+                || keypressRefreshPolicy.ShouldRefresh(now - lastRandomRefreshAt));
+
+            if (randomValuesChanged)
             {
                 randomState.Refresh();
                 lastRandomRefreshAt = now;
-                randomValuesChanged = true;
             }
 
-            byte[] packet = DmxFrameBuilder.BuildPacket(options, randomState.Values);
+            byte[] packet = DmxFrameBuilder.BuildPacket(options, randomState.Values, mouseState.GetValues());
             await transport.SendPacketAsync(packet, cancellationToken);
             frameNumber++;
-            if (ShouldLogFrame(options.OutputLogMode, randomValuesChanged))
+            bool packetChanged = previousPacket is null
+                ? HasChangeTrackedChannels(options)
+                : !packet.SequenceEqual(previousPacket);
+            if (ShouldLogFrame(options.OutputLogMode, packetChanged))
             {
                 outputLogger.LogFrame(frameNumber, options, packet);
             }
 
-            randomValuesChanged = false;
+            previousPacket = packet;
             await Task.Delay(frameDelay, cancellationToken);
         }
     }
 
-    private static bool ShouldLogFrame(OutputLogMode outputLogMode, bool randomValuesChanged)
+    private static bool ShouldLogFrame(OutputLogMode outputLogMode, bool packetChanged)
     {
         return outputLogMode switch
         {
             OutputLogMode.Continuous => true,
-            OutputLogMode.RandomChange => randomValuesChanged,
+            OutputLogMode.Change => packetChanged,
             OutputLogMode.None => false,
             _ => false
         };
     }
 
-    private static IRandomRefreshPolicy CreateRefreshPolicy(SendOptions options, IKeyPressSource keyPressSource)
+    private static bool HasChangeTrackedChannels(SendOptions options)
     {
-        return options.RandomUpdateMode switch
-        {
-            RandomUpdateMode.Interval => new IntervalRandomRefreshPolicy(TimeSpan.FromMilliseconds(options.RandomIntervalMs)),
-            RandomUpdateMode.Keypress => new KeypressRandomRefreshPolicy(keyPressSource),
-            _ => throw new InvalidOperationException($"Unsupported random update mode {options.RandomUpdateMode}.")
-        };
+        return options.RandomChannels.Count > 0 || options.MouseChannels.Count > 0;
     }
 }

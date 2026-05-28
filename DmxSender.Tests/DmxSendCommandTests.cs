@@ -32,10 +32,16 @@ public sealed class DmxSendCommandTests
             "10",
             "--random",
             "11",
-            "--random-update",
-            "keypress",
             "--random-interval-ms",
             "250",
+            "--mouse",
+            "12=x",
+            "-m",
+            "13=y",
+            "--mouse",
+            "14=xi",
+            "-m",
+            "15=yi",
             "--refresh-hz",
             "30",
             "--log-output",
@@ -47,12 +53,18 @@ public sealed class DmxSendCommandTests
         Assert.AreEqual("COM8", receivedOptions.PortName);
         Assert.AreEqual(10, receivedOptions.StartChannel);
         Assert.AreEqual(9, receivedOptions.ChannelCount);
-        Assert.AreEqual(RandomUpdateMode.Keypress, receivedOptions.RandomUpdateMode);
         Assert.AreEqual(250, receivedOptions.RandomIntervalMs);
         Assert.AreEqual(30, receivedOptions.RefreshHz);
         Assert.AreEqual(OutputLogMode.Continuous, receivedOptions.OutputLogMode);
         CollectionAssert.AreEqual(new[] { new ChannelValue(15, 255), new ChannelValue(16, 32) }, receivedOptions.FixedValues.ToArray());
         CollectionAssert.AreEqual(new[] { 10, 11 }, receivedOptions.RandomChannels.ToArray());
+        CollectionAssert.AreEqual(new[]
+        {
+            new MouseChannelMapping(12, MouseAxis.X),
+            new MouseChannelMapping(13, MouseAxis.Y),
+            new MouseChannelMapping(14, MouseAxis.XInverted),
+            new MouseChannelMapping(15, MouseAxis.YInverted)
+        }, receivedOptions.MouseChannels.ToArray());
     }
 
     [TestMethod]
@@ -92,7 +104,7 @@ public sealed class DmxSendCommandTests
     }
 
     [TestMethod]
-    public async Task InvokeAsync_ParsesRandomChangeOutputLogging()
+    public async Task InvokeAsync_ParsesChangeOutputLogging()
     {
         SendOptions? receivedOptions = null;
         RootCommand command = DmxSendCommand.Create((options, _) =>
@@ -105,16 +117,16 @@ public sealed class DmxSendCommandTests
             "--port",
             "COM8",
             "--log-output",
-            "random-change"
+            "change"
         ]).InvokeAsync(new InvocationConfiguration());
 
         Assert.AreEqual(0, exitCode);
         Assert.IsNotNull(receivedOptions);
-        Assert.AreEqual(OutputLogMode.RandomChange, receivedOptions.OutputLogMode);
+        Assert.AreEqual(OutputLogMode.Change, receivedOptions.OutputLogMode);
     }
 
     [TestMethod]
-    public async Task InvokeAsync_ParsesPerChannelRandomRanges()
+    public async Task InvokeAsync_ParsesPerChannelRanges()
     {
         SendOptions? receivedOptions = null;
         RootCommand command = DmxSendCommand.Create((options, _) =>
@@ -130,23 +142,25 @@ public sealed class DmxSendCommandTests
             "1",
             "--random",
             "2",
-            "--random-range",
+            "--mouse",
+            "3=x",
+            "--range",
             "1=40-180",
-            "--random-range",
-            "2=10-20"
+            "--range",
+            "3=10-20"
         ]).InvokeAsync(new InvocationConfiguration());
 
         Assert.AreEqual(0, exitCode);
         Assert.IsNotNull(receivedOptions);
         CollectionAssert.AreEqual(new[]
         {
-            new RandomChannelRange(1, new RandomValueRange(40, 180)),
-            new RandomChannelRange(2, new RandomValueRange(10, 20))
-        }, receivedOptions.RandomRanges.ToArray());
+            new ChannelRange(1, new RandomValueRange(40, 180)),
+            new ChannelRange(3, new RandomValueRange(10, 20))
+        }, receivedOptions.Ranges.ToArray());
     }
 
     [TestMethod]
-    public async Task InvokeAsync_RejectsRandomRangeForNonRandomChannel()
+    public async Task InvokeAsync_RejectsRangeForUncontrolledChannel()
     {
         var senderCalled = false;
         RootCommand command = DmxSendCommand.Create((_, _) =>
@@ -161,7 +175,7 @@ public sealed class DmxSendCommandTests
             "COM8",
             "--random",
             "1",
-            "--random-range",
+            "--range",
             "2=10-20"
         ]).InvokeAsync(new InvocationConfiguration
         {
@@ -170,11 +184,11 @@ public sealed class DmxSendCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.IsFalse(senderCalled);
-        StringAssert.Contains(error.ToString(), "Random range channel 2 must also be specified with --random.");
+        StringAssert.Contains(error.ToString(), "Range channel 2 must also be specified with --random or --mouse.");
     }
 
     [TestMethod]
-    public async Task InvokeAsync_RejectsInvalidRandomRange()
+    public async Task InvokeAsync_RejectsInvalidRange()
     {
         var senderCalled = false;
         RootCommand command = DmxSendCommand.Create((_, _) =>
@@ -189,7 +203,7 @@ public sealed class DmxSendCommandTests
             "COM8",
             "--random",
             "1",
-            "--random-range",
+            "--range",
             "1=200-100"
         ]).InvokeAsync(new InvocationConfiguration
         {
@@ -230,5 +244,31 @@ public sealed class DmxSendCommandTests
         Assert.IsFalse(senderCalled);
         StringAssert.Contains(error.ToString(), "20");
         StringAssert.Contains(error.ToString(), "10-18");
+    }
+
+    [TestMethod]
+    public async Task InvokeAsync_RejectsInvalidMouseAxis()
+    {
+        var senderCalled = false;
+        RootCommand command = DmxSendCommand.Create((_, _) =>
+        {
+            senderCalled = true;
+            return Task.FromResult(0);
+        });
+        using var error = new StringWriter();
+
+        int exitCode = await command.Parse([
+            "--port",
+            "COM8",
+            "--mouse",
+            "1=z"
+        ]).InvokeAsync(new InvocationConfiguration
+        {
+            Error = error
+        });
+
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(senderCalled);
+        StringAssert.Contains(error.ToString(), "Expected --mouse value '1=z' to use channel=x, channel=xi, channel=y, or channel=yi with channel >= 1.");
     }
 }

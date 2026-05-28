@@ -18,6 +18,7 @@ public sealed class DmxSendRunnerTests
             options,
             transport,
             new SequenceRandomByteSource(10, 20, 30, 40),
+            new StubMousePositionSource(),
             new NoKeyPressSource(),
             logger,
             cancellation.Token));
@@ -27,23 +28,62 @@ public sealed class DmxSendRunnerTests
     }
 
     [TestMethod]
-    public async Task RunAsync_RandomChangeLoggingLogsOnlyInitialAndChangedRandomValues()
+    public async Task RunAsync_ChangeLoggingLogsInitialAndKeypressRandomValues()
     {
         using var cancellation = new CancellationTokenSource();
         var logger = new CapturingOutputLogger();
         var transport = new CancellingTransport(cancellation, cancelAfterSends: 3);
-        SendOptions options = CreateOptions(OutputLogMode.RandomChange);
+        SendOptions options = CreateOptions(OutputLogMode.Change);
 
         await Assert.ThrowsExceptionAsync<TaskCanceledException>(() => DmxSendRunner.RunAsync(
             options,
             transport,
             new SequenceRandomByteSource(10, 20, 30, 40),
+            new StubMousePositionSource(),
             new SecondPollKeyPressSource(),
             logger,
             cancellation.Token));
 
         Assert.AreEqual(2, logger.Frames.Count);
         CollectionAssert.AreEqual(new long[] { 1, 2 }, logger.Frames.Select(frame => frame.FrameNumber).ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0, 10, 20 }, logger.Frames[0].Packet);
+        CollectionAssert.AreEqual(new byte[] { 0, 30, 40 }, logger.Frames[1].Packet);
+    }
+
+    [TestMethod]
+    public async Task RunAsync_ChangeLoggingLogsMouseValueChanges()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var logger = new CapturingOutputLogger();
+        var transport = new CancellingTransport(cancellation, cancelAfterSends: 3);
+        var options = new SendOptions(
+            "COM8",
+            StartChannel: 1,
+            ChannelCount: 1,
+            FixedValues: [],
+            RandomChannels: [],
+            Ranges: [],
+            MouseChannels: [new MouseChannelMapping(1, MouseAxis.X)],
+            RandomIntervalMs: 1000,
+            RefreshHz: 1000,
+            OutputLogMode: OutputLogMode.Change);
+
+        await Assert.ThrowsExceptionAsync<TaskCanceledException>(() => DmxSendRunner.RunAsync(
+            options,
+            transport,
+            new SequenceRandomByteSource(),
+            new SequenceMousePositionSource(
+                new MousePosition(0, 0),
+                new MousePosition(0, 0),
+                new MousePosition(100, 0)),
+            new NoKeyPressSource(),
+            logger,
+            cancellation.Token));
+
+        Assert.AreEqual(2, logger.Frames.Count);
+        CollectionAssert.AreEqual(new long[] { 1, 3 }, logger.Frames.Select(frame => frame.FrameNumber).ToArray());
+        CollectionAssert.AreEqual(new byte[] { 0, 0 }, logger.Frames[0].Packet);
+        CollectionAssert.AreEqual(new byte[] { 0, 255 }, logger.Frames[1].Packet);
     }
 
     private static SendOptions CreateOptions(OutputLogMode outputLogMode)
@@ -54,11 +94,11 @@ public sealed class DmxSendRunnerTests
             ChannelCount: 2,
             FixedValues: [],
             RandomChannels: [1, 2],
-            RandomRanges: [],
-            RandomUpdateMode.Keypress,
+            Ranges: [],
+            MouseChannels: [],
             RandomIntervalMs: 1000,
             RefreshHz: 1000,
-            outputLogMode);
+            OutputLogMode: outputLogMode);
     }
 
     private sealed class CancellingTransport(CancellationTokenSource cancellation, int cancelAfterSends) : IDmxTransport
@@ -103,6 +143,39 @@ public sealed class DmxSendRunnerTests
 
         public void ConsumeKey()
         {
+        }
+    }
+
+    private sealed class StubMousePositionSource : IMousePositionSource
+    {
+        public MousePosition GetPosition()
+        {
+            return new MousePosition(0, 0);
+        }
+
+        public ScreenBounds GetScreenBounds()
+        {
+            return new ScreenBounds(0, 0, 1, 1);
+        }
+    }
+
+    private sealed class SequenceMousePositionSource(params MousePosition[] positions) : IMousePositionSource
+    {
+        private int _index;
+
+        public MousePosition GetPosition()
+        {
+            if (_index >= positions.Length)
+            {
+                return positions[^1];
+            }
+
+            return positions[_index++];
+        }
+
+        public ScreenBounds GetScreenBounds()
+        {
+            return new ScreenBounds(0, 0, 101, 101);
         }
     }
 
